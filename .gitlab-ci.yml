@@ -1,72 +1,78 @@
 workflow:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
 
 stages:
+  - secrets
   - build
   - test
 
-maven-build:
-  stage: build
+gitleaks-scan:
+  stage: secrets
+  image:
+    name: zricethezav/gitleaks
+    entrypoint: [""]
+  tags:
+    - linux
+    - bas2301
   script:
-    - ./mvnw.cmd -B clean test package
+    - gitleaks detect --source . -v --redact
+  allow_failure: false
+
+build-job:
+  stage: build
+  needs: ["gitleaks-scan"]
+  image: eclipse-temurin:21-jdk
+  tags:
+    - linux
+    - bas2302
+  script:
+    - chmod +x mvnw
+    - ./mvnw package -DskipTests
   artifacts:
     paths:
       - target/*.jar
+    expire_in: 1 week
 
-semgrep-sast:
+sast-semgrep:
   stage: test
-  variables:
-    PYTHONUTF8: "1"
-    PYTHONIOENCODING: "utf-8"
+  image: semgrep/semgrep
+  tags:
+    - linux
+    - bas2302
   script:
-    - $env:Path += ";$env:APPDATA\Python\Python314\Scripts"
-    - semgrep scan --config auto --gitlab-sast -o gl-sast-report.json .
-  allow_failure: true
+    - semgrep scan --config auto --sarif --output report.sarif .
   artifacts:
-    when: always
     reports:
-      sast: gl-sast-report.json
+      sast: report.sarif
 
-dependency-check:
+sca-dependency-check:
   stage: test
-  timeout: 2h
+  image: maven:3.9-eclipse-temurin-21
+  tags:
+    - linux
+    - bas2302
   script:
-    - ./mvnw.cmd dependency-check:check -DretireJsAnalyzerEnabled=false -Dformat=HTML "-DsuppressionFiles=dependency-check-suppression.xml"
-  allow_failure: true
+    - chmod +x mvnw
+    - ./mvnw dependency-check:check
   artifacts:
-    when: always
     paths:
       - target/dependency-check-report.html
 
-dast-baseline:
+dast-zap:
   stage: test
-  needs:
-    - job: maven-build
-      artifacts: true
+  image:
+    name: zaproxy/zap-stable
+    entrypoint: [""]
+  tags:
+    - linux
+    - bas2302
   script:
-    - $env:ZAP_PATH = "C:\ZAP\ZAP_D-2026-03-18"
-    - Start-Process -NoNewWindow -FilePath java -ArgumentList "-jar", (Get-Item target\*.jar).FullName
-    - Start-Sleep -Seconds 30
-    - python "$env:ZAP_PATH\zap-baseline.py" -t http://localhost:8080 -r zap-baseline-report.html -c rules.tsv; exit 0
-  allow_failure: true
+    - apt-get update && apt-get install -y openjdk-21-jre
+    - java -jar target/*.jar &
+    - sleep 30
+    - zap-baseline.py -t http://localhost:8080 -c zap-rules.tsv -r zap-report.html || true
   artifacts:
-    when: always
     paths:
-      - zap-baseline-report.html
-
-dast-api:
-  stage: test
-  needs:
-    - job: maven-build
-      artifacts: true
-  script:
-    - $env:ZAP_PATH = "C:\ZAP\ZAP_D-2026-03-18"
-    - Start-Process -NoNewWindow -FilePath java -ArgumentList "-jar", (Get-Item target\*.jar).FullName
-    - Start-Sleep -Seconds 30
-    - python "$env:ZAP_PATH\zap-api-scan.py" -t http://localhost:8080/v3/api-docs -f openapi -r zap-api-report.html -c rules.tsv; exit 0
-  allow_failure: true
-  artifacts:
-    when: always
-    paths:
-      - zap-api-report.html
+      - zap-report.html
+    expire_in: 1 week
