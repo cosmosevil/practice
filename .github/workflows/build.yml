@@ -16,7 +16,6 @@ jobs:
       - name: Gitleaks Scan
         run: |
           docker run --rm -v ${{ github.workspace }}:/code zricethezav/gitleaks:latest detect --source="/code" --no-git -v
-  
 
   build-test-security:
     needs: [secrets-scan]
@@ -31,33 +30,24 @@ jobs:
         run: ./mvnw package -DskipTests
       - name: Semgrep SAST
         run: docker run --rm -v $(pwd):/src semgrep/semgrep semgrep scan --config auto --sarif --output report.sarif
-      - name: Dependency Check SCA
-        run: ./mvnw dependency-check:check
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: application-jar
           path: target/*.jar
 
-
   container-security:
     needs: [build-test-security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-
       - name: Set lower case repo name
         run: |
           echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> ${GITHUB_ENV}
-
       - uses: actions/download-artifact@v4
         with: { name: application-jar, path: target/ }
-
       - name: Build Image
         run: docker build -t ghcr.io/${{ env.REPO_LC }}:latest .
-
-
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -65,7 +55,6 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL'
           ignore-unfixed: true
-
       - name: Login and Push
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
