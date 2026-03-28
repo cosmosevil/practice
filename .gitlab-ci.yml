@@ -14,7 +14,7 @@ gitleaks-scan:
     entrypoint: [""]
   tags:
     - linux
-    - bas2301
+    - bas2302
   script:
     - gitleaks detect --source . -v --redact
   allow_failure: false
